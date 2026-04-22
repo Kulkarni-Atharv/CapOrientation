@@ -123,19 +123,18 @@ class CapsuleDetector:
         upper = int(min(255, (1.0 + sigma) * v))
         edges = cv2.Canny(blurred, lower, upper)
         
-        # 3. Close the edge loops
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        # 3. Close the edge loops with a MUCH smaller kernel to prevent bloating/rounding
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, k, iterations=2)
         
-        # 4. Fill the external contours to create a solid mask (like thresholding but smarter)
+        # 4. Fill the external contours to create a solid mask
         contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         mask = np.zeros_like(gray)
         for cnt in contours:
-            # Only fill reasonably sized objects to avoid filling background noise
             if cv2.contourArea(cnt) > self.min_area * 0.5:
                 cv2.drawContours(mask, [cnt], -1, 255, thickness=cv2.FILLED)
                 
-        # Final cleanup to ensure smooth boundaries
+        # Final cleanup to remove small noise without expanding the contour
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
         return mask
 
@@ -200,31 +199,33 @@ class CapsuleDetector:
         if h < 5 or w < 5:
             return 0.5, 0.0
 
-        if cap_type == "COLOURED":
-            # Saturation profile – seam is where saturation changes most
-            hsv    = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-            signal = hsv[:, :, 1].astype(float).mean(axis=0)
-        else:
-            # Horizontal gradient profile – seam creates edge even in transparent
-            gray   = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
-            sobel  = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-            signal = np.abs(sobel).mean(axis=0)
+        # Universal Seam Detector: Sum of absolute differences along the X-axis
+        # This perfectly catches both physical ridges (transparent) and color splits (coloured)
+        patch_float = patch.astype(float)
+        
+        # Calculate horizontal color gradient
+        diff = np.abs(np.diff(patch_float, axis=1))
+        
+        # Average across the height of the capsule and across the 3 color channels
+        signal = diff.mean(axis=(0, 2))
 
+        # Smooth the signal to remove noise
         signal = self._smooth(signal, sigma=max(3, w // 20))
 
-        margin = int(w * 0.15)
-        grad   = np.abs(np.gradient(signal))
-        region = grad[margin: w - margin]
+        # Ignore the extreme edges (the rounded tips of the capsule)
+        margin = int(w * 0.20)
+        region = signal[margin: w - margin]
 
         if region.size == 0:
             return 0.5, 0.0
 
+        # The seam is the absolute maximum color/gradient change in the middle region
         peak_idx   = int(np.argmax(region)) + margin
         seam_ratio = peak_idx / w
 
         # Confidence: how prominent is the peak vs background
         mean_val   = float(region.mean()) + 1e-6
-        confidence = min(1.0, float(region.max()) / mean_val / 10.0)
+        confidence = min(1.0, float(region.max()) / mean_val / 5.0)
 
         return seam_ratio, confidence
 
