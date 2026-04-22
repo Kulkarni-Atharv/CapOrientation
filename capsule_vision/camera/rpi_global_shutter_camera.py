@@ -31,47 +31,18 @@ class RPiGlobalShutterCamera:
         log.info("Opening camera.")
         self.picam2 = Picamera2()
 
-        cfg = self.picam2.create_video_configuration(
-            main={
-                "size":   (self.cfg.width, self.cfg.height),
-                "format": "RGB888",   # Native RGB from sensor
-            }
+        # Using the exact configuration from the user snippet
+        cfg = self.picam2.create_preview_configuration(
+            main={"size": (1456, 1088)},
+            lores={"size": (640, 480)},
+            display="main"
         )
+        
         self.picam2.configure(cfg)
         self.picam2.start()
 
-        # ── Step 1: Enable AE + AWB and set framerate ─────────────────────
-        self.picam2.set_controls({
-            "AeEnable":  True,
-            "AwbEnable": True,
-            "FrameRate": float(self.cfg.framerate),
-        })
-
-        # ── Step 2: Wait for AWB to settle (IMX296 needs ~2s) ────────────
-        log.info("Waiting for AWB to settle...")
-        time.sleep(2.0)
-
-        # ── Step 3: Read the converged colour gains ───────────────────────
-        metadata      = self.picam2.capture_metadata()
-        colour_gains  = metadata.get("ColourGains")
-        log.info("AWB settled — ColourGains: %s", colour_gains)
-
-        # ── Step 4: Lock gains so every frame is colour-consistent ────────
-        if colour_gains:
-            self.picam2.set_controls({
-                "AwbEnable":   False,           # Stop AWB from drifting
-                "ColourGains": colour_gains,    # Lock the settled values
-            })
-        else:
-            # Fallback: known-good gains for indoor LED lighting
-            log.warning("ColourGains not available — using fallback gains.")
-            self.picam2.set_controls({
-                "AwbEnable":   False,
-                "ColourGains": (2.2, 1.5),      # (R_gain, B_gain) — tune if needed
-            })
-
         self._is_open = True
-        log.info("Camera ready — AWB locked.")
+        log.info("Camera ready.")
 
     def release(self) -> None:
         if self.picam2 is not None and self._is_open:
@@ -83,13 +54,12 @@ class RPiGlobalShutterCamera:
         if not self._is_open or self.picam2 is None:
             return None
         try:
-            # 2. Take the feed from the camera (Camera Original Feed is RGB)
-            frame_rgb = self.picam2.capture_array("main")
+            frame = self.picam2.capture_array()
             
-            # 3. Convert it into BGR for OpenCV processing and live display
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            # ✅ FIX: Convert RGB → BGR
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
-            return frame_bgr
+            return frame
         except Exception as exc:
             log.error("Frame capture failed: %s", exc)
             return None
