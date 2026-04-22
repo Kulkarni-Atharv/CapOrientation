@@ -16,6 +16,7 @@ import time
 from typing import Optional
 
 import numpy as np
+import cv2
 
 try:
     from picamera2 import Picamera2
@@ -67,7 +68,7 @@ class RPiGlobalShutterCamera:
         cfg = self._picam2.create_preview_configuration(
             main={
                 "size":   (self._cfg.width, self._cfg.height),
-                "format": "BGR888",
+                "format": "RGB888",
             },
             controls={"FrameRate": float(self._cfg.framerate)},
         )
@@ -123,7 +124,9 @@ class RPiGlobalShutterCamera:
             log.error("read_frame() called on closed camera.")
             return None
         try:
-            return self._picam2.capture_array()   # already BGR, no conversion
+            frame = self._picam2.capture_array()
+            # Picamera2 returns RGB natively; OpenCV requires BGR.
+            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         except Exception as exc:   # noqa: BLE001
             log.error("Frame capture failed: %s", exc)
             return None
