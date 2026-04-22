@@ -64,14 +64,15 @@ class RPiGlobalShutterCamera:
 
         self._picam2 = Picamera2()
 
-        # ── BGR888: direct OpenCV format, zero conversion overhead ──────
-        cfg = self._picam2.create_preview_configuration(
+        # ── Video Config: Optimized for continuous headless capture ──────
+        cfg = self._picam2.create_video_configuration(
             main={
                 "size":   (self._cfg.width, self._cfg.height),
                 "format": "RGB888",
-            },
-            controls={"FrameRate": float(self._cfg.framerate)},
+            }
         )
+        cfg["main"]["framerate"] = float(self._cfg.framerate)
+        
         self._picam2.configure(cfg)
 
         # ── Step 1: full auto to let sensor settle ───────────────────────
@@ -124,9 +125,10 @@ class RPiGlobalShutterCamera:
             log.error("read_frame() called on closed camera.")
             return None
         try:
-            frame = self._picam2.capture_array()
-            # Picamera2 returns RGB natively; OpenCV requires BGR.
-            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            # request_image("main") is safer and non-blocking compared to capture_array()
+            frame = self._picam2.capture_array("main")
+            # Fast NumPy slicing to flip RGB to BGR
+            return frame[:, :, ::-1]
         except Exception as exc:   # noqa: BLE001
             log.error("Frame capture failed: %s", exc)
             return None
