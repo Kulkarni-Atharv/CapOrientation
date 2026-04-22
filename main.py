@@ -5,31 +5,17 @@ CapsuleVision – application entry-point.
 
 Usage
 -----
-    python main.py              # default config, live display
-    python main.py --no-display # headless mode (logging only)
-    python main.py --scale 0.5  # display at 50% of sensor resolution
-    python main.py --fps 30     # override framerate
-    python main.py --exposure 3000  # override exposure (µs)
+    python main.py                         # live display (default)
+    python main.py --no-display            # headless / SSH mode
+    python main.py --width 1280 --height 720 --fps 30
+    python main.py --log-level DEBUG
 
-Architecture
-------------
-                        ┌──────────────────────┐
-                        │   RPi Global Shutter  │
-                        │   Camera (IMX296)     │
-                        └──────────┬───────────┘
-                                   │  Picamera2
-                        ┌──────────▼───────────┐
-                        │   FrameProducer       │  ← background thread
-                        │   (camera I/O loop)   │
-                        └──────────┬───────────┘
-                                   │  queue.Queue[FramePacket]
-              ┌────────────────────▼────────────────────┐
-              │              Main Thread                 │
-              │                                          │
-              │   LiveViewer (OpenCV HUD display)        │
-              │       │                                  │
-              │       └─── [Future] Orientation Detector │
-              └──────────────────────────────────────────┘
+Camera strategy
+---------------
+  1. Start in full auto (AE + AWB)
+  2. Wait 2 s for sensor to settle
+  3. Lock exposure, gain, and colour-gains
+  4. Stream stable BGR888 frames into the AI pipeline
 """
 
 import argparse
@@ -37,62 +23,34 @@ import queue
 import signal
 import sys
 
-from capsule_vision.camera    import RPiGlobalShutterCamera
-from capsule_vision.config    import DEFAULT_CONFIG
-from capsule_vision.display   import LiveViewer
-from capsule_vision.pipeline  import FrameProducer
-from capsule_vision.utils     import setup_root_logger, get_logger
+from capsule_vision.camera   import RPiGlobalShutterCamera
+from capsule_vision.config   import DEFAULT_CONFIG
+from capsule_vision.display  import LiveViewer
+from capsule_vision.pipeline import FrameProducer
+from capsule_vision.utils    import setup_root_logger, get_logger
 
 
 # ---------------------------------------------------------------------------
-# Argument parsing
+# CLI
 # ---------------------------------------------------------------------------
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    p = argparse.ArgumentParser(
         prog="capsule_vision",
-        description="CapsuleVision – RPi Global Shutter Camera feed viewer",
+        description="CapsuleVision – RPi Global Shutter Camera feed",
     )
-    parser.add_argument(
-        "--no-display",
-        action="store_true",
-        default=False,
-        help="Run headless (no OpenCV window – logging only)",
-    )
-    parser.add_argument(
-        "--scale",
-        type=float,
-        default=0.5,
-        metavar="FLOAT",
-        help="Display window scale factor (default: 0.5)",
-    )
-    parser.add_argument(
-        "--fps",
-        type=int,
-        default=None,
-        metavar="INT",
-        help="Override camera framerate",
-    )
-    parser.add_argument(
-        "--exposure",
-        type=int,
-        default=None,
-        metavar="INT",
-        help="Override exposure time in microseconds",
-    )
-    parser.add_argument(
-        "--gain",
-        type=float,
-        default=None,
-        metavar="FLOAT",
-        help="Override analogue gain (1.0 – 16.0)",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging verbosity level (default: INFO)",
-    )
-    return parser.parse_args()
+    p.add_argument("--no-display", action="store_true",
+                   help="Headless mode – no OpenCV window")
+    p.add_argument("--scale",  type=float, default=1.0,
+                   help="Display window scale factor (default: 1.0)")
+    p.add_argument("--width",  type=int,   default=None,
+                   help="Capture width  (default: 1280)")
+    p.add_argument("--height", type=int,   default=None,
+                   help="Capture height (default: 720)")
+    p.add_argument("--fps",    type=int,   default=None,
+                   help="Capture framerate (default: 30)")
+    p.add_argument("--log-level", default="INFO",
+                   choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    return p.parse_args()
 
 
 # ---------------------------------------------------------------------------
@@ -101,37 +59,33 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
 
-    # ── 1. Build config ────────────────────────────────────────────────
+    # ── Config ─────────────────────────────────────────────────────────────
     cfg = DEFAULT_CONFIG
-
-    # Apply CLI overrides
-    if args.fps is not None:
-        cfg.camera.framerate = args.fps
-    if args.exposure is not None:
-        cfg.camera.exposure_us = args.exposure
-    if args.gain is not None:
-        cfg.camera.analogue_gain = args.gain
+    if args.width:  cfg.camera.width     = args.width
+    if args.height: cfg.camera.height    = args.height
+    if args.fps:    cfg.camera.framerate = args.fps
     cfg.logging.level = args.log_level
 
-    # ── 2. Configure logging ───────────────────────────────────────────
+    # ── Logging ─────────────────────────────────────────────────────────────
     setup_root_logger(cfg.logging)
     log = get_logger("main")
 
-    log.info("=" * 60)
+    log.info("=" * 55)
     log.info("CapsuleVision  –  starting up")
-    log.info("Camera    : %dx%d @ %d fps", cfg.camera.width, cfg.camera.height, cfg.camera.framerate)
-    log.info("Exposure  : %d µs    Gain: %.1f", cfg.camera.exposure_us, cfg.camera.analogue_gain)
-    log.info("Display   : %s", "disabled (headless)" if args.no_display else f"enabled (scale={args.scale})")
-    log.info("=" * 60)
+    log.info("Resolution : %dx%d @ %d fps",
+             cfg.camera.width, cfg.camera.height, cfg.camera.framerate)
+    log.info("Display    : %s",
+             "headless" if args.no_display else f"on (scale={args.scale})")
+    log.info("=" * 55)
 
-    # ── 3. Initialise hardware ─────────────────────────────────────────
-    camera   = RPiGlobalShutterCamera(cfg.camera)
+    # ── Camera (auto-expose → lock → stream) ────────────────────────────────
+    camera = RPiGlobalShutterCamera(cfg.camera)
     camera.open()
 
-    # ── 4. Build the shared frame queue ───────────────────────────────
+    # ── Frame queue ─────────────────────────────────────────────────────────
     frame_queue: queue.Queue = queue.Queue(maxsize=cfg.pipeline.queue_size)
 
-    # ── 5. Start the producer thread ──────────────────────────────────
+    # ── Producer thread ─────────────────────────────────────────────────────
     producer = FrameProducer(
         camera        = camera,
         out_queue     = frame_queue,
@@ -139,9 +93,9 @@ def main() -> int:
     )
     producer.start()
 
-    # ── 6. Graceful shutdown on SIGINT / SIGTERM ───────────────────────
-    def _shutdown(sig, frame_ref):  # noqa: ANN001
-        log.info("Signal %s received – initiating shutdown.", sig)
+    # ── Graceful shutdown ───────────────────────────────────────────────────
+    def _shutdown(sig, _frame):
+        log.info("Signal %s – shutting down.", sig)
         producer.stop()
         camera.release()
         sys.exit(0)
@@ -149,20 +103,20 @@ def main() -> int:
     signal.signal(signal.SIGINT,  _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # ── 7. Run display / headless loop ─────────────────────────────────
+    # ── Display / headless loop ─────────────────────────────────────────────
     try:
         if args.no_display:
-            log.info("Headless mode active.  Press Ctrl-C to stop.")
-            producer.join()   # Block until producer exits (or Ctrl-C)
+            log.info("Headless mode.  Ctrl-C to stop.")
+            producer.join()
         else:
             viewer = LiveViewer(
                 in_queue    = frame_queue,
                 window_name = "CapsuleVision – Live Feed",
                 scale       = args.scale,
             )
-            viewer.run(fps_ref=lambda: producer.fps)
+            viewer.run()
     finally:
-        log.info("Shutting down…")
+        log.info("Stopping …")
         producer.stop()
         producer.join(timeout=5.0)
         camera.release()
