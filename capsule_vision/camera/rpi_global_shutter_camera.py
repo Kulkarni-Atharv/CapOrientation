@@ -50,89 +50,71 @@ class RPiGlobalShutterCamera:
                 "Picamera2 not found. Install it with:\n"
                 "  sudo apt install python3-picamera2"
             )
-        self._cfg   = config
-        self._picam2: Optional[Picamera2] = None
+        self.cfg   = config
+        self.picam2: Optional[Picamera2] = None
         self._meta:   dict = {}
-        self._open:   bool = False
+        self._is_open:   bool = False
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
     def open(self) -> None:
         log.info("Opening camera %dx%d @ %d fps",
-                 self._cfg.width, self._cfg.height, self._cfg.framerate)
+                 self.cfg.width, self.cfg.height, self.cfg.framerate)
 
-        self._picam2 = Picamera2()
+        self.picam2 = Picamera2()
 
-        # ── Video Config: Optimized for continuous headless capture ──────
-        cfg = self._picam2.create_video_configuration(
+        cfg = self.picam2.create_video_configuration(
             main={
-                "size":   (self._cfg.width, self._cfg.height),
-                "format": "RGB888",
+                "size":   (self.cfg.width, self.cfg.height),
+                "format": "BGR888",
             }
         )
-        cfg["main"]["framerate"] = float(self._cfg.framerate)
-        
-        self._picam2.configure(cfg)
+        self.picam2.configure(cfg)
+        self.picam2.start()
 
-        # ── Run in continuous Auto Mode ───────────────────────
-        # Locking AWB on the global shutter camera can cause extreme blue/purple tints
-        # if the warmup frame is bad. We will leave it in continuous auto.
-        self._picam2.set_controls({
+        self.picam2.set_controls({
             "AeEnable":  True,
             "AwbEnable": True,
+            "FrameRate": float(self.cfg.framerate),
         })
-        self._picam2.start()
 
-        self._open = True
+        self._is_open = True
         log.info("Camera ready (Auto Mode).")
 
     def release(self) -> None:
-        if self._picam2 is not None and self._open:
+        if self.picam2 is not None and self._is_open:
             log.info("Releasing camera.")
             try:
-                self._picam2.stop()
+                self.picam2.stop()
             except Exception as exc:   # noqa: BLE001
                 log.warning("Error stopping camera: %s", exc)
             finally:
-                self._open   = False
-                self._picam2 = None
+                self._is_open   = False
+                self.picam2 = None
             log.info("Camera released.")
 
-    # ------------------------------------------------------------------
-    # Frame acquisition
-    # ------------------------------------------------------------------
     def read_frame(self) -> Optional[np.ndarray]:
         """Return one BGR888 frame — ready for OpenCV / AI pipeline."""
-        if not self._open or self._picam2 is None:
+        if not self._is_open or self.picam2 is None:
             log.error("read_frame() called on closed camera.")
             return None
         try:
-            frame = self._picam2.capture_array("main")
-            
-            if frame is not None:
-                # Convert the native RGB array from Picamera2 into BGR for OpenCV
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                
+            # ✅ Already BGR888 — NO cv2.cvtColor needed
+            frame = self.picam2.capture_array("main")
             return frame
         except Exception as exc:   # noqa: BLE001
             log.error("Frame capture failed: %s", exc)
             return None
 
-    # ------------------------------------------------------------------
-    # Metadata / properties
-    # ------------------------------------------------------------------
     def get_metadata(self) -> dict:
         return dict(self._meta)
 
     @property
     def is_open(self) -> bool:
-        return self._open
+        return self._is_open
 
     @property
     def resolution(self) -> tuple[int, int]:
-        return (self._cfg.width, self._cfg.height)
+        return (self.cfg.width, self.cfg.height)
 
     @property
     def framerate(self) -> float:
-        return float(self._cfg.framerate)
+        return float(self.cfg.framerate)
