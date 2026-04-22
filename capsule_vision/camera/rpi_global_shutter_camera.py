@@ -125,13 +125,15 @@ class RPiGlobalShutterCamera:
             log.error("read_frame() called on closed camera.")
             return None
         try:
-            # request_image("main") is safer and non-blocking compared to capture_array()
             frame = self._picam2.capture_array("main")
             
-            # The camera is returning RGB (which makes skin look blue in OpenCV).
-            # We explicitly convert it to BGR here to fix the Smurf effect!
+            # Brute-force color swap (RGB to BGR)
             if frame is not None:
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # Force the swap using numpy indexing
+                frame = frame[:, :, [2, 1, 0]]
+                # DRAW A WHITE SQUARE IN THE TOP LEFT (Visual Proof)
+                frame[0:20, 0:20] = [255, 255, 255]
+                
             return frame
         except Exception as exc:   # noqa: BLE001
             log.error("Frame capture failed: %s", exc)
