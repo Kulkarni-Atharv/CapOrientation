@@ -75,34 +75,17 @@ class RPiGlobalShutterCamera:
         
         self._picam2.configure(cfg)
 
-        # ── Step 1: full auto to let sensor settle ───────────────────────
+        # ── Run in continuous Auto Mode ───────────────────────
+        # Locking AWB on the global shutter camera can cause extreme blue/purple tints
+        # if the warmup frame is bad. We will leave it in continuous auto.
         self._picam2.set_controls({
             "AeEnable":  True,
             "AwbEnable": True,
         })
         self._picam2.start()
-        log.info("Auto-exposure running — stabilising for 2 s …")
-        time.sleep(2)
-
-        # ── Step 2: read the stable values ──────────────────────────────
-        metadata    = self._picam2.capture_metadata()
-        exposure    = metadata["ExposureTime"]
-        gain        = metadata["AnalogueGain"]
-        awb_gains   = metadata["ColourGains"]
-        log.info("Locked  exposure=%d µs  gain=%.2f  awb_gains=%s",
-                 exposure, gain, awb_gains)
-
-        # ── Step 3: lock — every frame identical for AI ─────────────────
-        self._picam2.set_controls({
-            "AeEnable":   False,
-            "AwbEnable":  False,
-            "ExposureTime": exposure,
-            "AnalogueGain": gain,
-            "ColourGains":  awb_gains,
-        })
 
         self._open = True
-        log.info("Camera ready (locked).")
+        log.info("Camera ready (Auto Mode).")
 
     def release(self) -> None:
         if self._picam2 is not None and self._open:
@@ -127,12 +110,9 @@ class RPiGlobalShutterCamera:
         try:
             frame = self._picam2.capture_array("main")
             
-            # Brute-force color swap (RGB to BGR)
             if frame is not None:
-                # Force the swap using numpy indexing
-                frame = frame[:, :, [2, 1, 0]]
-                # DRAW A WHITE SQUARE IN THE TOP LEFT (Visual Proof)
-                frame[0:20, 0:20] = [255, 255, 255]
+                # Convert the native RGB array from Picamera2 into BGR for OpenCV
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
             return frame
         except Exception as exc:   # noqa: BLE001
