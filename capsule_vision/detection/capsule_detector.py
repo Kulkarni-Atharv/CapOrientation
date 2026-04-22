@@ -100,7 +100,7 @@ class CapsuleDetector:
 
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0 or crop.shape[0] < 10 or crop.shape[1] < 10:
-             return OrientationResult(detected=False)
+             return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
 
         # 2. Angle calculation inside the tight AI Crop
         # Because the crop is perfectly surrounding the capsule, finding the ellipse is trivial
@@ -116,11 +116,11 @@ class CapsuleDetector:
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
-            return OrientationResult(detected=False)
+            return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
 
         largest_cnt = max(contours, key=cv2.contourArea)
         if len(largest_cnt) < 5:
-            return OrientationResult(detected=False)
+            return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
 
         ellipse_crop = cv2.fitEllipse(largest_cnt)
         
@@ -139,7 +139,7 @@ class CapsuleDetector:
         # 4. Straighten using global ellipse but we can just warp the whole frame
         patch = self._straighten(frame, global_ellipse)
         if patch is None or patch.size == 0:
-            return OrientationResult(detected=False)
+            return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
 
         # 5. Seam
         seam_ratio, seam_conf = self._find_seam(patch, cap_type)

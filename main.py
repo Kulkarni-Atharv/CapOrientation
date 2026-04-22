@@ -61,11 +61,17 @@ def main() -> int:
 
     # Use custom capsule model if available, otherwise use generic fallback
     model_file = "models/capsule_best.pt" if os.path.exists("models/capsule_best.pt") else "yolov8n.pt"
+    
+    if model_file == "yolov8n.pt":
+        print("\n" + "!"*60)
+        print("WARNING: 'models/capsule_best.pt' WAS NOT FOUND!")
+        print("The AI is using the GENERIC fallback model, which is BLIND to capsules!")
+        print("!"*60 + "\n")
 
     # ── Orientation detector (YOLOv8 + OpenCV) ───────────────────────────────
     detector = CapsuleDetector(
         model_path    = model_file,
-        conf_thresh   = 0.50,
+        conf_thresh   = 0.15,  # Lowered to 0.15 to see if the AI is detecting with low confidence
         sat_threshold = 35,
     )
 
