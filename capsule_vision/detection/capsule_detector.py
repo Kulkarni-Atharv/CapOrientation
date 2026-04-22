@@ -113,14 +113,30 @@ class CapsuleDetector:
     # Step 1 – mask
     # ------------------------------------------------------------------
     def _build_mask(self, gray: np.ndarray) -> np.ndarray:
+        # 1. Smooth to reduce noise
         blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-        _, mask  = cv2.threshold(
-            blurred, 0, 255,
-            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-        )
-        k    = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k, iterations=1)
+        
+        # 2. Adaptive Canny Edge Detection (ignores shiny reflections inside capsule)
+        v = np.median(blurred)
+        sigma = 0.33
+        lower = int(max(0, (1.0 - sigma) * v))
+        upper = int(min(255, (1.0 + sigma) * v))
+        edges = cv2.Canny(blurred, lower, upper)
+        
+        # 3. Close the edge loops
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, k, iterations=2)
+        
+        # 4. Fill the external contours to create a solid mask (like thresholding but smarter)
+        contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        mask = np.zeros_like(gray)
+        for cnt in contours:
+            # Only fill reasonably sized objects to avoid filling background noise
+            if cv2.contourArea(cnt) > self.min_area * 0.5:
+                cv2.drawContours(mask, [cnt], -1, 255, thickness=cv2.FILLED)
+                
+        # Final cleanup to ensure smooth boundaries
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
         return mask
 
     # ------------------------------------------------------------------
