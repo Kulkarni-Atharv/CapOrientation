@@ -1,0 +1,11 @@
+# YOLOv8 Training Cache
+runs/
+yolov8n.pt
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# OS Files
+.DS_Store
+Thumbs.db

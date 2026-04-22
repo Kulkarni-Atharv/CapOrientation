@@ -12,6 +12,7 @@ import argparse
 import queue
 import signal
 import sys
+import os
 
 import cv2
 
@@ -58,9 +59,12 @@ def main() -> int:
                              warmup_frames=cfg.pipeline.warmup_frames)
     producer.start()
 
+    # Use custom capsule model if available, otherwise use generic fallback
+    model_file = "models/capsule_best.pt" if os.path.exists("models/capsule_best.pt") else "yolov8n.pt"
+
     # ── Orientation detector (YOLOv8 + OpenCV) ───────────────────────────────
     detector = CapsuleDetector(
-        model_path    = "models/yolov8n.pt",  # Fallback. Will download automatically.
+        model_path    = model_file,
         conf_thresh   = 0.50,
         sat_threshold = 35,
     )
