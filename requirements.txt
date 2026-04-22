@@ -7,6 +7,9 @@ opencv-python>=4.9.0
 # NumPy (Picamera2 also needs it)
 numpy>=1.26.0
 
+# AI/ML Pipeline
+ultralytics>=8.1.0
+
 # Picamera2 is installed via apt on Raspberry Pi OS, NOT pip.
 # If you are on a Pi, run:
 #   sudo apt update

@@ -24,14 +24,13 @@ except ImportError:
     Picamera2 = None            # type: ignore[assignment,misc]
     _PICAMERA2_AVAILABLE = False
 
-from capsule_vision.camera.camera_interface import CameraInterface
 from capsule_vision.config import CameraConfig
 from capsule_vision.utils  import get_logger
 
 log = get_logger(__name__)
 
 
-class RPiGlobalShutterCamera(CameraInterface):
+class RPiGlobalShutterCamera:
     """
     Concrete driver for the Raspberry Pi Global Shutter Camera (IMX296).
 

@@ -58,12 +58,11 @@ def main() -> int:
                              warmup_frames=cfg.pipeline.warmup_frames)
     producer.start()
 
-    # ── Orientation detector ─────────────────────────────────────────────────
+    # ── Orientation detector (YOLOv8 + OpenCV) ───────────────────────────────
     detector = CapsuleDetector(
-        min_area         = 2000,
-        max_area         = 500_000,
-        aspect_ratio_min = 1.8,
-        sat_threshold    = 35,
+        model_path    = "models/yolov8n.pt",  # Fallback. Will download automatically.
+        conf_thresh   = 0.50,
+        sat_threshold = 35,
     )
 
     # ── Shutdown handler ─────────────────────────────────────────────────────

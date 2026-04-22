@@ -14,6 +14,7 @@ _YELLOW = (0, 200, 255)
 _WHITE  = (240, 240, 240)
 _BLACK  = (10, 10, 10)
 _CYAN   = (220, 200, 0)
+_PURPLE = (255, 50, 255)
 
 _FONT       = cv2.FONT_HERSHEY_SIMPLEX
 _FONT_SCALE = 0.55
@@ -29,15 +30,21 @@ def annotate(frame: np.ndarray, result: OrientationResult) -> np.ndarray:
                     _FONT, 0.7, _RED, 2, cv2.LINE_AA)
         return out
 
-    # ── 1. Draw contour ─────────────────────────────────────────────────────
+    # ── 1. Draw YOLO Bounding Box ───────────────────────────────────────────
+    if result.bbox is not None:
+        x1, y1, x2, y2 = result.bbox
+        cv2.rectangle(out, (x1, y1), (x2, y2), _PURPLE, 2)
+        cv2.putText(out, "YOLO AI Box", (x1, y1 - 10), _FONT, 0.5, _PURPLE, 1, cv2.LINE_AA)
+
+    # ── 2. Draw contour ─────────────────────────────────────────────────────
     if result.contour is not None:
         cv2.drawContours(out, [result.contour], -1, _GREEN, 2)
 
-    # ── 2. Draw fitted ellipse ───────────────────────────────────────────────
+    # ── 3. Draw fitted ellipse ───────────────────────────────────────────────
     if result.ellipse is not None:
         cv2.ellipse(out, result.ellipse, _CYAN, 2)
 
-    # ── 3. Draw major axis line + seam marker ───────────────────────────────
+    # ── 4. Draw major axis line + seam marker ───────────────────────────────
     if result.ellipse is not None:
         (cx, cy), (minor_ax, major_ax), angle = result.ellipse
         half = int(major_ax / 2)
@@ -68,7 +75,7 @@ def annotate(frame: np.ndarray, result: OrientationResult) -> np.ndarray:
         cv2.putText(out, "CAP",  p1, _FONT, 0.45, _YELLOW,  1, cv2.LINE_AA)
         cv2.putText(out, "BODY", p2, _FONT, 0.45, _GREEN,   1, cv2.LINE_AA)
 
-    # ── 4. Info panel (top-left) ─────────────────────────────────────────────
+    # ── 5. Info panel (top-left) ─────────────────────────────────────────────
     lines = [
         f"Type       : {result.capsule_type}",
         f"Body side  : {result.long_body_side}",
