@@ -1,0 +1,22 @@
+# Requirements for CapsuleVision on Raspberry Pi CM5
+# Install with:  pip install -r requirements.txt
+
+# Core vision
+opencv-python>=4.9.0
+
+# NumPy (Picamera2 also needs it)
+numpy>=1.26.0
+
+# Picamera2 is installed via apt on Raspberry Pi OS, NOT pip.
+# If you are on a Pi, run:
+#   sudo apt update
+#   sudo apt install -y python3-picamera2
+#
+# For CI / development on a non-Pi host (mocking / unit-testing):
+# picamera2 is NOT listed here intentionally – the driver guards the import.
+
+# Optional – for future ML inference on CM5 / NPU
+# tflite-runtime>=2.14.0
+
+# Logging helpers (already in stdlib – listed for clarity)
+# logging  ← stdlib, no install needed
