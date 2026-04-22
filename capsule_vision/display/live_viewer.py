@@ -94,10 +94,6 @@ class LiveViewer:
                     interpolation=cv2.INTER_LINEAR,
                 )
 
-            # Render HUD overlay
-            fps_val = fps_ref() if fps_ref is not None else 0.0
-            frame   = self._draw_hud(frame, packet, fps_val)
-
             cv2.imshow(self._title, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):   # Q or ESC
@@ -107,38 +103,3 @@ class LiveViewer:
         cv2.destroyAllWindows()
         log.info("LiveViewer stopped.")
 
-    # ------------------------------------------------------------------
-    # HUD rendering
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _draw_hud(
-        frame:  np.ndarray,
-        packet: FramePacket,
-        fps:    float,
-    ) -> np.ndarray:
-        """Stamp diagnostic information onto the frame in-place."""
-        h, w = frame.shape[:2]
-
-        lines = [
-            f"Frame  : {packet.frame_id:07d}",
-            f"FPS    : {fps:5.1f}",
-            f"Res    : {w} x {h}",
-            f"Time   : {packet.timestamp:.3f} s",
-        ]
-
-        # Draw semi-transparent background rectangle for readability
-        box_h = len(lines) * _LINE_H + _PADDING * 2
-        box_w = 220
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (box_w, box_h), _BG_COLOR, -1)
-        cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-
-        for i, text in enumerate(lines):
-            y = _PADDING + (i + 1) * _LINE_H
-            cv2.putText(
-                frame, text,
-                (_PADDING, y),
-                _FONT, _FONT_SCALE, _HUD_COLOR, _THICKNESS, _LINE_TYPE,
-            )
-
-        return frame

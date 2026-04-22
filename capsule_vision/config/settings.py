@@ -41,7 +41,7 @@ class CameraConfig:
     # Camera index (usually 0 for single-camera CM5 setups)
     camera_index: int    = 0
     # Capture format passed to Picamera2
-    format: str          = "RGB888"    # BGR888 / RGB888 / XRGB8888
+    format: str          = "BGR888"    # BGR888 – direct OpenCV-compatible output (no conversion needed)
     # Buffer count – higher = smoother at cost of latency
     buffer_count: int    = 4
 

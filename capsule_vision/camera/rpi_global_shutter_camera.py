@@ -114,9 +114,11 @@ class RPiGlobalShutterCamera(CameraInterface):
                 "format": self._cfg.format,
             },
             controls={
-                "FrameRate":      float(self._cfg.framerate),
-                "ExposureTime":   self._cfg.exposure_us,
-                "AnalogueGain":   self._cfg.analogue_gain,
+                "FrameRate":    float(self._cfg.framerate),
+                "ExposureTime": self._cfg.exposure_us,
+                "AnalogueGain": self._cfg.analogue_gain,
+                "AwbEnable":    True,   # Enable automatic white balance – fixes orange tint
+                "AwbMode":      0,      # 0 = Auto (libcamera AwbModeEnum.Auto)
             },
             buffer_count=self._cfg.buffer_count,
         )
@@ -213,27 +215,25 @@ class RPiGlobalShutterCamera(CameraInterface):
         """
         Normalise any Picamera2 pixel format to a standard BGR uint8 array.
 
-        Picamera2 can return:
-          - RGB888  → convert to BGR
-          - BGR888  → already compatible with OpenCV
-          - XRGB8888 (4-channel RGBA-like) → strip alpha, convert
+        With format="BGR888" (recommended) no conversion is needed.
+        Fallback conversions are kept for other format strings.
         """
         if frame is None:
             raise ValueError("Received None frame from Picamera2.")
 
         if frame.ndim == 2:
-            # Monochrome → duplicate to 3-channel BGR
+            # Monochrome → 3-channel BGR
             return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
         channels = frame.shape[2] if frame.ndim == 3 else 1
 
         if channels == 3:
-            # Assume RGB888 (Picamera2 default for "RGB888")
-            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            # BGR888 – already in correct byte order for OpenCV, return as-is
+            return frame
 
         if channels == 4:
-            # XRGB8888 – strip the X channel (alpha-like) and convert
-            return cv2.cvtColor(frame[:, :, :3], cv2.COLOR_RGB2BGR)
+            # XRGB8888 – strip the X channel
+            return frame[:, :, :3]
 
         log.warning("Unexpected frame shape: %s — returning as-is.", frame.shape)
         return frame
