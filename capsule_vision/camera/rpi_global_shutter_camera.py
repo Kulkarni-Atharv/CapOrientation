@@ -127,8 +127,12 @@ class RPiGlobalShutterCamera:
         try:
             # request_image("main") is safer and non-blocking compared to capture_array()
             frame = self._picam2.capture_array("main")
-            # Fast NumPy slicing to flip RGB to BGR
-            return frame[:, :, ::-1]
+            
+            # The camera is returning RGB (which makes skin look blue in OpenCV).
+            # We explicitly convert it to BGR here to fix the Smurf effect!
+            if frame is not None:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            return frame
         except Exception as exc:   # noqa: BLE001
             log.error("Frame capture failed: %s", exc)
             return None
