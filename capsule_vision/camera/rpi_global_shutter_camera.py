@@ -1,6 +1,7 @@
 # capsule_vision/camera/rpi_global_shutter_camera.py
 
 from __future__ import annotations
+import time
 import numpy as np
 import cv2
 from typing import Optional
@@ -27,19 +28,50 @@ class RPiGlobalShutterCamera:
         self._is_open:   bool = False
 
     def open(self) -> None:
-        log.info("Opening camera in simplified mode.")
+        log.info("Opening camera.")
         self.picam2 = Picamera2()
-        
-        # 1. Trigger the camera and request its original RGB feed
+
         cfg = self.picam2.create_video_configuration(
-            main={"size": (self.cfg.width, self.cfg.height), "format": "RGB888"}
+            main={
+                "size":   (self.cfg.width, self.cfg.height),
+                "format": "RGB888",   # Native RGB from sensor
+            }
         )
         self.picam2.configure(cfg)
         self.picam2.start()
-        self.picam2.set_controls({"FrameRate": float(self.cfg.framerate)})
-        
+
+        # ── Step 1: Enable AE + AWB and set framerate ─────────────────────
+        self.picam2.set_controls({
+            "AeEnable":  True,
+            "AwbEnable": True,
+            "FrameRate": float(self.cfg.framerate),
+        })
+
+        # ── Step 2: Wait for AWB to settle (IMX296 needs ~2s) ────────────
+        log.info("Waiting for AWB to settle...")
+        time.sleep(2.0)
+
+        # ── Step 3: Read the converged colour gains ───────────────────────
+        metadata      = self.picam2.capture_metadata()
+        colour_gains  = metadata.get("ColourGains")
+        log.info("AWB settled — ColourGains: %s", colour_gains)
+
+        # ── Step 4: Lock gains so every frame is colour-consistent ────────
+        if colour_gains:
+            self.picam2.set_controls({
+                "AwbEnable":   False,           # Stop AWB from drifting
+                "ColourGains": colour_gains,    # Lock the settled values
+            })
+        else:
+            # Fallback: known-good gains for indoor LED lighting
+            log.warning("ColourGains not available — using fallback gains.")
+            self.picam2.set_controls({
+                "AwbEnable":   False,
+                "ColourGains": (2.2, 1.5),      # (R_gain, B_gain) — tune if needed
+            })
+
         self._is_open = True
-        log.info("Camera ready.")
+        log.info("Camera ready — AWB locked.")
 
     def release(self) -> None:
         if self.picam2 is not None and self._is_open:
