@@ -22,7 +22,7 @@ from typing import Optional
 
 import numpy as np
 
-from capsule_vision.camera import CameraInterface
+from capsule_vision.camera import RPiGlobalShutterCamera
 from capsule_vision.utils  import get_logger, FPSCounter
 
 log = get_logger(__name__)
@@ -63,7 +63,7 @@ class FrameProducer(threading.Thread):
 
     def __init__(
         self,
-        camera:       CameraInterface,
+        camera:       RPiGlobalShutterCamera,
         out_queue:    queue.Queue,
         warmup_frames: int = 30,
     ) -> None:
