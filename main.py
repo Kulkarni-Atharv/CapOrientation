@@ -3,16 +3,17 @@
 """
 Usage
 -----
-    python main.py                   # live display
-    python main.py --no-display      # headless / SSH
+    python main.py                        # live display
+    python main.py --no-display           # headless / SSH
     python main.py --width 1280 --height 720 --fps 30
+    python main.py --log-level DEBUG      # show raw YOLO box confidences
 """
 
 import argparse
 import queue
 import signal
 import sys
-import os
+from pathlib import Path
 
 import cv2
 
@@ -21,6 +22,9 @@ from capsule_vision.config    import DEFAULT_CONFIG
 from capsule_vision.detection import CapsuleDetector, annotate
 from capsule_vision.pipeline  import FrameProducer
 from capsule_vision.utils     import setup_root_logger, get_logger
+
+# Project root is one directory above this file
+_PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def _parse_args() -> argparse.Namespace:
@@ -49,29 +53,38 @@ def main() -> int:
     log.info("CapsuleVision starting  %dx%d @ %d fps",
              cfg.camera.width, cfg.camera.height, cfg.camera.framerate)
 
-    # ── Camera (auto AE/AWB → lock → stream BGR888) ─────────────────────────
+    # ── Camera ──────────────────────────────────────────────────────────────
     camera = RPiGlobalShutterCamera(cfg.camera)
     camera.open()
 
     # ── Frame queue + producer thread ───────────────────────────────────────
     frame_queue: queue.Queue = queue.Queue(maxsize=cfg.pipeline.queue_size)
-    producer = FrameProducer(camera=camera, out_queue=frame_queue,
-                             warmup_frames=cfg.pipeline.warmup_frames)
+    producer = FrameProducer(
+        camera        = camera,
+        out_queue     = frame_queue,
+        warmup_frames = cfg.pipeline.warmup_frames,
+    )
     producer.start()
 
-    # Use custom capsule model if available, otherwise use generic fallback
-    model_file = "models/capsule_best.pt" if os.path.exists("models/capsule_best.pt") else "yolov8n.pt"
-    
-    if model_file == "yolov8n.pt":
-        print("\n" + "!"*60)
-        print("WARNING: 'models/capsule_best.pt' WAS NOT FOUND!")
-        print("The AI is using the GENERIC fallback model, which is BLIND to capsules!")
-        print("!"*60 + "\n")
+    # ── Model selection (absolute path so CWD never matters) ────────────────
+    capsule_model = _PROJECT_ROOT / "models" / "capsule_best.pt"
+    if not capsule_model.exists():
+        log.error(
+            "Custom capsule model NOT FOUND at %s.\n"
+            "The generic yolov8n.pt is NOT able to detect capsules.\n"
+            "Please train / copy the model to models/capsule_best.pt and restart.",
+            capsule_model,
+        )
+        producer.stop()
+        camera.release()
+        return 1
 
-    # ── Orientation detector (YOLOv8 + OpenCV) ───────────────────────────────
+    log.info("Using capsule model: %s", capsule_model)
+
+    # ── Detector ────────────────────────────────────────────────────────────
     detector = CapsuleDetector(
-        model_path    = model_file,
-        conf_thresh   = 0.15,  # Lowered to 0.15 to see if the AI is detecting with low confidence
+        model_path    = str(capsule_model),
+        conf_thresh   = 0.05,   # low threshold — model confidence can be weak
         sat_threshold = 35,
     )
 
@@ -86,7 +99,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _shutdown)
 
     # ── Main loop ────────────────────────────────────────────────────────────
-    log.info("Running.  Press ESC / Q to quit.")
+    log.info("Running.  Press ESC / Q to quit.  Use --log-level DEBUG to see raw YOLO scores.")
     try:
         while True:
             try:
@@ -97,20 +110,24 @@ def main() -> int:
             frame  = packet.frame
             result = detector.detect(frame)
 
-            log.debug("Frame %d | %s | body=%s | conf=%.2f",
-                      packet.frame_id,
-                      result.capsule_type,
-                      result.long_body_side,
-                      result.confidence)
+            log.debug(
+                "Frame %d | detected=%s | type=%s | body=%s | ai_conf=%.3f | conf=%.3f",
+                packet.frame_id,
+                result.detected,
+                result.capsule_type,
+                result.long_body_side,
+                result.ai_conf,
+                result.confidence,
+            )
 
             if not args.no_display:
                 display = annotate(frame, result)
 
                 if args.scale != 1.0:
-                    h, w = display.shape[:2]
+                    dh, dw = display.shape[:2]
                     display = cv2.resize(
                         display,
-                        (int(w * args.scale), int(h * args.scale)),
+                        (int(dw * args.scale), int(dh * args.scale)),
                     )
 
                 cv2.imshow("CapsuleVision", display)
