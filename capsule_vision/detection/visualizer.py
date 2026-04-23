@@ -26,14 +26,16 @@ def annotate(frame: np.ndarray, result: OrientationResult) -> np.ndarray:
     out = frame.copy()
 
     if not result.detected:
-        cv2.putText(out, "No capsule detected (OpenCV Failed)", (20, 40),
-                    _FONT, 0.7, _RED, 2, cv2.LINE_AA)
-        
-        # If AI found it, but OpenCV failed, still draw the AI box!
-        if result.bbox is not None:
+        if result.bbox is None:
+            cv2.putText(out, "No object detected (YOLO Failed)", (20, 40),
+                        _FONT, 0.7, _RED, 2, cv2.LINE_AA)
+        else:
+            cv2.putText(out, "Object detected, but OpenCV Analysis Failed", (20, 40),
+                        _FONT, 0.7, _RED, 2, cv2.LINE_AA)
+            # If AI found it, but OpenCV failed, still draw the AI box!
             x1, y1, x2, y2 = result.bbox
             cv2.rectangle(out, (x1, y1), (x2, y2), _PURPLE, 2)
-            cv2.putText(out, "AI Box (Angle Failed)", (x1, y1 - 10), _FONT, 0.5, _PURPLE, 1, cv2.LINE_AA)
+            cv2.putText(out, "AI Box (OpenCV Failed)", (x1, y1 - 10), _FONT, 0.5, _PURPLE, 1, cv2.LINE_AA)
             
         return out
 

@@ -82,26 +82,91 @@ class CapsuleDetector:
         if self.model is None:
             return OrientationResult(detected=False)
 
-        # 1. AI Inference
+        h, w = frame.shape[:2]
+
+        h, w = frame.shape[:2]
+
+        # 1. AI Inference on the Full Frame
+        # YOLOv8 automatically scales the image internally to its network size (e.g. 640x640)
+        # Passing the full frame is much more reliable than cropping the center.
         results = self.model.predict(frame, conf=self.conf_thresh, verbose=False)
         
         if len(results) == 0 or len(results[0].boxes) == 0:
             return OrientationResult(detected=False)
 
-        # Get highest confidence box
-        box = results[0].boxes[0]
-        x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-        ai_conf = float(box.conf[0].cpu().numpy())
+        # Get highest confidence box (YOLO doesn't guarantee sorted output)
+        boxes = results[0].boxes
+        best_box = max(boxes, key=lambda b: float(b.conf[0]))
+        
+        # Coordinates are already in Full Frame
+        x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
+        ai_conf = float(best_box.conf[0].cpu().numpy())
 
-        # ===================================================================
-        # USER REQUEST: JUST DETECT THE CAPSULE FIRST!
-        # Return immediately right after YOLO finds the box, skipping all OpenCV
-        # ===================================================================
+        # Ensure bounds
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0 or crop.shape[0] < 10 or crop.shape[1] < 10:
+             return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
+
+        # 2. Angle calculation inside the tight AI Crop
+        # Because the crop is perfectly surrounding the capsule, finding the ellipse is trivial
+        gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        blurred   = cv2.GaussianBlur(gray_crop, (5, 5), 0)
+        _, mask   = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # Cleanup mask
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=2)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
+
+        largest_cnt = max(contours, key=cv2.contourArea)
+        if len(largest_cnt) < 5:
+            return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
+
+        ellipse_crop = cv2.fitEllipse(largest_cnt)
+        
+        # Translate ellipse coordinates back to full frame
+        (cx_crop, cy_crop), axes, angle = ellipse_crop
+        global_cx = cx_crop + x1
+        global_cy = cy_crop + y1
+        global_ellipse = ((global_cx, global_cy), axes, angle)
+        
+        # Translate contour to full frame for visualization
+        global_contour = largest_cnt + np.array([[x1, y1]])
+
+        # 3. Type
+        cap_type = self._classify_type(crop, largest_cnt)
+
+        # 4. Straighten using global ellipse but we can just warp the whole frame
+        patch = self._straighten(frame, global_ellipse)
+        if patch is None or patch.size == 0:
+            return OrientationResult(detected=False, bbox=(x1, y1, x2, y2))
+
+        # 5. Seam (Junction Point)
+        seam_ratio, seam_conf = self._find_seam(patch, cap_type)
+
+        # 6. Orientation
+        long_body_side, body_ratio = self._orientation(seam_ratio, global_ellipse[2])
+
         return OrientationResult(
-            detected=True,
-            capsule_type="AI DETECTED",
-            confidence=ai_conf,
-            bbox=(x1, y1, x2, y2)
+            detected       = True,
+            capsule_type   = cap_type,
+            angle_deg      = float(angle),
+            long_body_side = long_body_side,
+            seam_ratio     = seam_ratio,
+            body_ratio     = body_ratio,
+            confidence     = float(seam_conf * ai_conf),
+            center         = (int(global_cx), int(global_cy)),
+            ellipse        = global_ellipse,
+            contour        = global_contour,
+            bbox           = (x1, y1, x2, y2)
         )
 
     # ------------------------------------------------------------------
